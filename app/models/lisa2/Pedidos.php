@@ -19,21 +19,22 @@ use Ocrend\Kernel\Router\IRouter;
 class Pedidos extends Models implements IModels
 {
     private $pedidos = [];
-    private $contadorId = 5000;
+    private $contadorId = 1;
     private $jsonFilePath;
 
     // Reglas de validación para los pedidos
+
     private $validaciones = [
         'id' => ['type' => 'integer', 'required' => true],
         'idEmpresa' => ['type' => 'integer', 'required' => true],
         'idCentro' => ['type' => 'integer', 'required' => true],
-        'codigoPedido' => ['max_length' => 20, 'type' => 'string', 'required' => true],
+        'codigoPedido' => ['max_length' => 20, 'type' => 'integer', 'required' => true],
         'fechaPedido' => ['max_length' => 20, 'type' => 'string', 'required' => true],
-        'timestampCreacion' => ['max_length' => 20, 'type' => 'integer'],
-        'timestampActualizacion' => ['max_length' => 20, 'type' => 'integer'],
-        'usrCreacion' => ['max_length' => 20, 'type' => 'string', 'required' => false],
-        'usrActualizacion' => ['max_length' => 20, 'type' => 'string', 'required' => false],
-        'statusPedido' => ['max_length' => 50, 'type' => 'string', 'required' => true, 'allowed_values' => ['Pendiente', 'En Proceso', 'Completado', 'Cancelado']],
+        'timestampCreated' => ['max_length' => 20, 'type' => 'integer'],
+        'timestampUpdated' => ['max_length' => 20, 'type' => 'integer'],
+        'usrCreated' => ['max_length' => 20, 'type' => 'string', 'required' => false],
+        'usrUpdated' => ['max_length' => 20, 'type' => 'string', 'required' => false],
+        'statusPedido' => ['max_length' => 50, 'type' => 'string', 'required' => true, 'allowed_values' => ['Pendiente', 'En Proceso', 'Completado', 'Cancelado Totalmente', 'Cancelado Parcialmente']],
         'data' => ['type' => 'array', 'required' => false],
     ];
 
@@ -139,11 +140,24 @@ class Pedidos extends Models implements IModels
         try {
             global $http;
 
-            $params = $http->request->all();
+            $_params = $http->request->all();
 
-            if ($params == null) {
+            if ($_params == null) {
                 throw new Exception("No existe información.");
             }
+
+            $params = [
+                'idEmpresa' => 1,
+                'idCentro' => 1,
+                'codigoPedido' => $_params['pedidoExameLab']['codigoPedido'],
+                'fechaPedido' => $_params['pedidoExameLab']['atendimento']['dataPedido'],
+                'timestampCreated' => null,
+                'timestampUpdated' => null,
+                'statusPedido' => 'Pendiente',
+                'usrCreated' => null,
+                'usrUpdated' => null,
+                'data' => $_params,
+            ];
 
             $validatedParams = $this->setParameters($params);
             $this->cargarDatosIniciales();
@@ -160,23 +174,15 @@ class Pedidos extends Models implements IModels
                     $pedido['codigoPedido'] === $validatedParams['codigoPedido'] &&
                     $pedido['idEmpresa'] === $validatedParams['idEmpresa']
                 ) {
-                    throw new Exception("Ya existe un pedido con el código {$validatedParams['codigoPedido']} para la empresa con ID {$validatedParams['empresa_id']}.");
+                    throw new Exception("Ya existe un pedido con el código {$validatedParams['codigoPedido']} para la empresa con ID {$validatedParams['idEmpresa']}.");
                 }
             }
 
 
             $nuevoPedido = [
                 'id' => $this->contadorId,
-                'idEmpresa' => 1,
-                'idCentro' => 1,
-                'codigoPedido' => date('ymd') . $this->contadorId,
-                'fechaPedido' => date('Y-m-d H:i:s'),
-                'timestampCreacion' => time(),
-                'timestampActualizacion' => null,
-                'statusPedido' => 'Pendiente',
-                'usrCreacion' => 'mchang',
-                'usrActualizacion' => null,
-                'data' => $params,
+                'timestampCreated' => time(),
+                'usrCreated' => 'mchang',
             ] + $validatedParams;
 
             $this->pedidos[] = $nuevoPedido;
@@ -189,7 +195,7 @@ class Pedidos extends Models implements IModels
                 'data' => $nuevoPedido,
             );
         } catch (Exception $e) {
-            return array('status' => false, 'data' => $http->request->all(), 'message' => $e->getMessage(), 'errorCode' => $e->getCode());
+            return array('status' => false,  'message' => $e->getMessage(), 'data' => $http->request->all(), 'errorCode' => $e->getCode());
         }
     }
 
@@ -199,9 +205,10 @@ class Pedidos extends Models implements IModels
             global $http;
             $this->cargarDatosIniciales();
             $result = $this->pedidos;
-            $params = $http->request->all();
+            $params = $http->query->all();
 
             if (!empty($params)) {
+                // Filtros estándar
                 foreach ($params as $key => $value) {
                     if (array_key_exists($key, $this->validaciones) && $value !== '') {
                         $result = array_filter($result, function ($pedido) use ($key, $value) {
@@ -215,6 +222,31 @@ class Pedidos extends Models implements IModels
                         });
                     }
                 }
+
+                // Filtrado por rango de fechas
+                if (isset($params['fechaDesde']) || isset($params['fechaHasta'])) {
+                    $fechaInicio = isset($params['fechaDesde']) ? strtotime($params['fechaDesde']) : null;
+                    $fechaFin = isset($params['fechaHasta']) ? strtotime($params['fechaHasta']) : null;
+
+                    // Validar que las fechas sean válidas
+                    if ($fechaInicio === false && isset($params['fechaDesde'])) {
+                        throw new Exception("Fecha de inicio inválida: {$params['fechaDesde']}");
+                    }
+                    if ($fechaFin === false && isset($params['fechaHasta'])) {
+                        throw new Exception("Fecha de fin inválida: {$params['fechaHasta']}");
+                    }
+
+                    $result = array_filter($result, function ($pedido) use ($fechaInicio, $fechaFin) {
+                        $fechaPedido = strtotime($pedido['fechaPedido']);
+                        if ($fechaInicio !== null && $fechaPedido < $fechaInicio) {
+                            return false;
+                        }
+                        if ($fechaFin !== null && $fechaPedido > $fechaFin) {
+                            return false;
+                        }
+                        return true;
+                    });
+                }
                 $result = array_values($result);
             }
 
@@ -222,7 +254,7 @@ class Pedidos extends Models implements IModels
                 $sortBy = $params['sort_by'];
                 $sortOrder = strtoupper($params['sort_order']) === 'DESC' ? SORT_DESC : SORT_ASC;
 
-                if (array_key_exists($sortBy, $this->validaciones) || $sortBy === 'fecha_creacion') {
+                if (array_key_exists($sortBy, $this->validaciones) || $sortBy === 'fechaPedido') {
                     usort($result, function ($a, $b) use ($sortBy, $sortOrder) {
                         if (!isset($a[$sortBy]) || !isset($b[$sortBy])) {
                             return 0;
@@ -361,10 +393,13 @@ class Pedidos extends Models implements IModels
         }
     }
 
-    public function cancelar(int $id, bool $total = true, array $itemsCancelados = []): array
+    public function cancelar(int $id, bool $total = true): array
     {
         try {
+
             global $http;
+
+            $pedidoDetalle = $http->request->all();
             $this->cargarDatosIniciales();
             $pedidoIndex = array_search($id, array_column($this->pedidos, 'id'));
 
@@ -375,43 +410,21 @@ class Pedidos extends Models implements IModels
             $pedido = &$this->pedidos[$pedidoIndex];
 
             // Verificar si el pedido ya está cancelado o completado
-            if ($pedido['statusPedido'] === 'Cancelado') {
-                throw new Exception("El pedido con ID $id ya está cancelado.");
+            if ($pedido['statusPedido'] === 'Cancelado Totalmente') {
+                throw new Exception("El pedido con ID $id ya está cancelado totalmente.");
             }
             if ($pedido['statusPedido'] === 'Completado') {
                 throw new Exception("No se puede cancelar un pedido completado con ID $id.");
             }
 
-            if ($total) {
-                // Cancelación total
-                $pedido['statusPedido'] = 'Cancelado';
+            if ($total == true) {
+                $pedido['statusPedido'] = 'Cancelado Totalmente';
             } else {
-                // Cancelación parcial
-                if (empty($pedido['detalles'])) {
-                    throw new Exception("El pedido con ID $id no tiene detalles para cancelar parcialmente.");
-                }
-
-                if (empty($itemsCancelados)) {
-                    throw new Exception("Debe especificar los ítems a cancelar para una cancelación parcial.");
-                }
-
-                $detallesOriginales = $pedido['detalles'];
-                $detallesRestantes = array_diff($detallesOriginales, $itemsCancelados);
-
-                if (count($detallesRestantes) === count($detallesOriginales)) {
-                    throw new Exception("Ningún ítem especificado para cancelar coincide con los detalles del pedido.");
-                }
-
-                $pedido['detalles'] = array_values($detallesRestantes);
-                $pedido['observaciones'] = isset($pedido['observaciones'])
-                    ? $pedido['observaciones'] . " | Cancelación parcial de " . implode(', ', $itemsCancelados) . " el " . date('Y-m-d H:i:s')
-                    : "Cancelación parcial de " . implode(', ', $itemsCancelados) . " el " . date('Y-m-d H:i:s');
-
-                // Si no quedan detalles, cambiar estado a Cancelado
-                if (empty($pedido['detalles'])) {
-                    $pedido['estado'] = 'Cancelado';
-                }
+                $pedido['statusPedido'] = 'Cancelado Parcialmente';
             }
+
+            $pedido['timestampUpdated'] = time();
+            $pedido['data'] = $pedidoDetalle;
 
             $this->guardarEnJson();
 

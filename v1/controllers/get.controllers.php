@@ -20,6 +20,13 @@ $app->get('/roles', function () use ($app) {
     return $app->json($u->listar());
 });
 
+
+// Pedidos
+$app->get('/pedidos', function () use ($app) {
+    $u = new Model\Pedidos;
+    return $app->json($u->listar());
+});
+
 // Informes
 $app->get('/informes/historial', function () use ($app) {
     $u = new Model\Informes;

@@ -10,8 +10,13 @@ $app->delete('/empresas/{id}', function ($id) use ($app) {
 
 
 // Pedidos
-$app->delete('/pedidos/{id}', function ($id) use ($app) {
-    global $http;
+$app->delete('/pedidos/{tipo}/{id}', function ($tipo, $id) use ($app) {
     $u = new Model\Pedidos;
-    return $app->json($u->cancelar($id, true, $http->request->all()));
+    if ($tipo == 1) {
+        // Cancelación Total
+        return $app->json($u->cancelar($id, true));
+    } else {
+        // Cancelación Parcial
+        return $app->json($u->cancelar($id, false));
+    }
 });
